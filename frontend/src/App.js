@@ -95,13 +95,24 @@ function App() {
 
   const analyzeReport = async (message, reportToAnalyze = lastTestReport) => {
     try {
-      const response = await axios.post(`${API_URL}/api/analyze-report`, { 
-        message,
-        report: reportToAnalyze?.stats || null
+      console.log('Sending to analyze-report:', { 
+        message, 
+        report: reportToAnalyze 
       });
+      
+      const response = await axios.post(`${API_URL}/analyze-report`, { 
+        message,
+        report: reportToAnalyze
+      });
+      
+      console.log('Received analysis response:', response.data);
       return response.data;
     } catch (error) {
-      console.error('Analysis error:', error);
+      console.error('Analysis error:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
       throw new Error(error.response?.data?.error || "Could not get AI analysis.");
     }
   }
@@ -187,8 +198,9 @@ function App() {
                 <div className="analysis-section">
                   <h3>Test Results Analysis</h3>
                   <Chat 
-                    testResults={lastTestReport.stats} 
+                    testResults={lastTestReport?.stats || null}
                     onSendMessage={analyzeReport}
+                    lastTestReport={lastTestReport}
                   />
                 </div>
             )}
