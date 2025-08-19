@@ -162,35 +162,53 @@ app.get('/api/reports', (req, res) => {
     res.json(reportHistory);
 });
 
-// NEW: Endpoint to analyze a report with Gemini AI
+// Chat-based analysis endpoint
 app.post('/api/analyze-report', async (req, res) => {
-    const report = req.body.report;
-    if (!report) {
-        return res.status(400).send({ error: 'Report data is required.' });
+    const { message, report } = req.body;
+    
+    if (!message) {
+        return res.status(400).send({ error: 'Message is required for analysis.' });
     }
 
     try {
-        const prompt = `Analyze this load test report and provide insights:
+        let context = '';
         
-        Test Duration: ${(report.endTime - report.startTime) / 1000} seconds
-        Total Requests: ${report.totalRequests}
-        Successful Requests: ${report.successfulRequests}
-        Failed Requests: ${report.failedRequests}
-        Success Rate: ${report.successRate}
-        Average Requests Per Second: ${report.averageRPS}
+        if (report) {
+            context = `Here are the test results you can analyze:
+            
+            Test Duration: ${(report.endTime - report.startTime) / 1000} seconds
+            Total Requests: ${report.totalRequests}
+            Successful Requests: ${report.successfulRequests}
+            Failed Requests: ${report.failedRequests}
+            Success Rate: ${report.successRate}
+            Average RPS: ${report.averageRPS}
+            
+            User's question: "${message}"
+            
+            Please provide a helpful response based on the test results above.`;
+        } else {
+            context = `The user is asking about load testing in general. Here's their question: "${message}"`;
+        }
         
-        Please analyze the performance and provide recommendations for optimization.`;
+        const prompt = `You are a Load Testing Assistant. Your job is to help users understand and analyze their load test results.
+        
+        ${context}
+        
+        Provide a clear, concise, and helpful response. If the user asks for recommendations, suggest specific optimizations based on the test results.`;
         
         const result = await model.generateContent(prompt);
         const response = await result.response;
         const text = response.text();
-        res.send({ analysis: text });
+        
+        res.send({ 
+            analysis: text,
+            timestamp: new Date().toISOString()
+        });
     } catch (error) {
         console.error("Error with Gemini API:", error);
-        // Send a more specific error message back to the frontend
         res.status(500).send({ 
             error: `AI analysis failed: ${error.message}`,
-            details: error.stack
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 });
