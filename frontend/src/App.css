@@ -199,3 +199,24 @@ input {
   border-bottom-left-radius: 5px;
   border-bottom-right-radius: 5px;
 }
+
+/* Form Elements Styling */
+select, textarea {
+  width: 100%;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid #666;
+  box-sizing: border-box;
+  font-size: 1em;
+  background-color: #555;
+  color: white;
+  font-family: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.ai-report.error p {
+  color: #ff9a9a;
+}

@@ -9,15 +9,18 @@ const API_URL = 'http://localhost:3001';
 function App() {
   const [systemResources, setSystemResources] = useState(null);
   const [testConfig, setTestConfig] = useState({
-    url: 'https://www.google.com',
+    url: 'https://httpbin.org/get',
     concurrency: '10',
     duration: '20',
+    method: 'GET',
+    body: '',
   });
   const [isTesting, setIsTesting] = useState(false);
   const [lastTestReport, setLastTestReport] = useState(null);
   const [pastReports, setPastReports] = useState([]);
-  const [analysis, setAnalysis] = useState({ content: null, loading: false });
+  const [analysis, setAnalysis] = useState({ content: null, loading: false, error: null });
   const intervalRef = useRef(null);
+  const showBodyTextarea = testConfig.method === 'POST' || testConfig.method === 'PUT';
 
   // Fetch system resources on initial load
   useEffect(() => {
@@ -90,12 +93,14 @@ function App() {
   };
 
   const analyzeReport = async (reportToAnalyze) => {
-    setAnalysis({ content: null, loading: true });
+    setAnalysis({ content: null, loading: true, error: null });
     try {
-        const response = await axios.post(`${API_URL}/api/analyze-report`, { report: reportToAnalyze.stats });
-        setAnalysis({ content: response.data.analysis, loading: false });
-    } catch(error) {
-        setAnalysis({ content: "Error: Could not get AI analysis.", loading: false });
+      const response = await axios.post(`${API_URL}/api/analyze-report`, { report: reportToAnalyze.stats });
+      setAnalysis({ content: response.data.analysis, loading: false, error: null });
+    } catch (error) {
+      console.error(error);
+      const errorMessage = error.response?.data?.error || "Could not get AI analysis.";
+      setAnalysis({ content: null, loading: false, error: errorMessage });
     }
   }
 
@@ -117,22 +122,58 @@ function App() {
 
         <div className="card test-controls">
           <h2>Test Configuration</h2>
-          <div className="form-group"><label>Target URL</label><input type="text" name="url" value={testConfig.url} onChange={handleInputChange} disabled={isTesting}/></div>
-          <div className="form-group-inline">
-            <div className="form-group"><label>Concurrent Users</label><input type="number" name="concurrency" value={testConfig.concurrency} onChange={handleInputChange} disabled={isTesting}/></div>
-            <div className="form-group"><label>Duration (seconds)</label><input type="number" name="duration" value={testConfig.duration} onChange={handleInputChange} disabled={isTesting}/></div>
+          <div className="form-group">
+            <label>Target URL</label>
+            <input type="text" name="url" value={testConfig.url} onChange={handleInputChange} disabled={isTesting} />
           </div>
-          <div className="button-group"><button onClick={startTest} disabled={isTesting}>Start Test</button><button onClick={stopTest} disabled={!isTesting} className="stop-button">Stop Test</button></div>
+          <div className="form-group-inline">
+            <div className="form-group">
+              <label>HTTP Method</label>
+              <select name="method" value={testConfig.method} onChange={handleInputChange} disabled={isTesting}>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Concurrent Users</label>
+              <input type="number" name="concurrency" value={testConfig.concurrency} onChange={handleInputChange} disabled={isTesting} />
+            </div>
+            <div className="form-group">
+              <label>Duration (seconds)</label>
+              <input type="number" name="duration" value={testConfig.duration} onChange={handleInputChange} disabled={isTesting} />
+            </div>
+          </div>
+          {showBodyTextarea && (
+            <div className="form-group">
+              <label>Request Body (JSON)</label>
+              <textarea 
+                name="body" 
+                value={testConfig.body} 
+                onChange={handleInputChange} 
+                disabled={isTesting} 
+                rows="5" 
+                placeholder='{ "key": "value" }'
+              ></textarea>
+            </div>
+          )}
+          <div className="button-group">
+            <button onClick={startTest} disabled={isTesting}>Start Test</button>
+            <button onClick={stopTest} disabled={!isTesting} className="stop-button">Stop Test</button>
+          </div>
         </div>
 
         {(lastTestReport) && (
           <div className="card live-results">
             <h2>{isTesting ? "Live Test Results" : "Last Test Report"}</h2>
             <div className="stats-grid">
-              <div>Time Elapsed: <strong>{isTesting ? lastTestReport.elapsedTime : lastTestReport.stats.duration}s</strong></div>
-              <div>Requests Sent: <strong>{lastTestReport.stats.requestsSent}</strong></div>
-              <div>Success: <strong className="success-text">{lastTestReport.stats.successCount}</strong></div>
-              <div>Errors: <strong className="error-text">{lastTestReport.stats.errorCount}</strong></div>
+              <div>Time Elapsed: <strong>{isTesting ? lastTestReport.elapsedTime : (lastTestReport.stats.testDuration || '0s')}</strong></div>
+              <div>Total Requests: <strong>{lastTestReport.stats.totalRequests || 0}</strong></div>
+              <div>Success: <strong className="success-text">{lastTestReport.stats.successfulRequests || 0}</strong></div>
+              <div>Failed: <strong className="error-text">{lastTestReport.stats.failedRequests || 0}</strong></div>
+              <div>Success Rate: <strong>{lastTestReport.stats.successRate || '0%'}</strong></div>
+              <div>Avg RPS: <strong>{lastTestReport.stats.averageRPS || 0}</strong></div>
             </div>
             <div className="chart-container">
               <h3>Requests Per Second (RPS)</h3>
@@ -142,10 +183,22 @@ function App() {
             </div>
             {!isTesting && (
                 <div className="analysis-section">
-                    <button onClick={() => analyzeReport(lastTestReport)} disabled={analysis.loading}>
-                        {analysis.loading ? "Analyzing..." : "Analyze with AI ✨"}
-                    </button>
-                    {analysis.content && <div className="ai-report"><p>{analysis.content}</p></div>}
+                  <button 
+                    onClick={() => analyzeReport(lastTestReport)} 
+                    disabled={analysis.loading}
+                  >
+                    {analysis.loading ? "Analyzing..." : "Analyze with AI ✨"}
+                  </button>
+                  {analysis.error && (
+                    <div className="ai-report error">
+                      <p>{analysis.error}</p>
+                    </div>
+                  )}
+                  {analysis.content && (
+                    <div className="ai-report">
+                      <p>{analysis.content}</p>
+                    </div>
+                  )}
                 </div>
             )}
           </div>
