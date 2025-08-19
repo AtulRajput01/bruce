@@ -4,90 +4,161 @@ const express = require('express');
 const cors = require('cors');
 const os = require('os-utils');
 const axios = require('axios');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = 3001;
 
-// --- Middleware ---
-app.use(cors());      // Allows the React frontend to communicate with this server
-app.use(express.json()); // Allows the server to understand JSON data
+app.use(cors());
+app.use(express.json());
 
 // --- State Variables ---
-let isTestRunning = false;
 let testInterval;
+let testTimeout;
+let isTestRunning = false;
+let testStats = {};
+const reportHistory = []; // To store the last 3 reports
+
+// --- NEW: Gemini AI Setup ---
+const GEMINI_API_KEY = "AIzaSyDlzNbkWBGttMy2ksdGpRr5DR7MpNXVsaY"; // Your API Key
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash"});
+
 
 // --- API Endpoints ---
 
-// 1. Get System Resources
+// NEW: Endpoint to get system resource details
 app.get('/api/resources', (req, res) => {
-  os.cpuUsage(function(v){
-    const cpuUsage = v * 100;
+  os.cpuUsage(function(cpuUsage) {
     const freeMemPercentage = os.freememPercentage() * 100;
-    const totalMemGB = (os.totalmem() / 1024).toFixed(2);
     const cpuCount = os.cpuCount();
-
-    // Suggest concurrency: e.g., 50 concurrent users per core at 80% capacity
+    // A simple heuristic for suggested concurrency
     const suggestedConcurrency = Math.floor(cpuCount * 50 * 0.8);
 
     res.json({
-      cpuUsage: cpuUsage.toFixed(2),
+      cpuUsage: (cpuUsage * 100).toFixed(2),
       freeMemPercentage: freeMemPercentage.toFixed(2),
-      totalMemGB,
       cpuCount,
-      suggestedConcurrency
+      suggestedConcurrency,
     });
   });
 });
 
-// 2. Start the Load Test
+// Start the Load Test (Upgraded)
 app.post('/api/start-test', (req, res) => {
   if (isTestRunning) {
     return res.status(400).json({ message: 'A test is already in progress.' });
   }
-
-  const { url, concurrency } = req.body;
-  if (!url || !concurrency) {
-    return res.status(400).json({ message: 'URL and concurrency are required.' });
+  const { url, concurrency, duration } = req.body;
+  if (!url || !concurrency || !duration) {
+    return res.status(400).json({ message: 'URL, concurrency, and duration are required.' });
   }
 
   isTestRunning = true;
-  let requestsSent = 0;
-  let errors = 0;
+  testStats = {
+    url,
+    concurrency,
+    duration,
+    requestsSent: 0,
+    successCount: 0,
+    errorCount: 0,
+    requestsPerSecond: 0,
+    startTime: Date.now(),
+    history: [],
+  };
+  let requestsThisSecond = 0;
 
-  console.log(`Starting test on ${url} with ${concurrency} concurrent users.`);
-
-  // Send 'concurrency' number of requests every second
   testInterval = setInterval(() => {
     for (let i = 0; i < concurrency; i++) {
       axios.get(url)
-        .then(response => {
-          requestsSent++;
-        })
-        .catch(error => {
-          errors++;
-          console.error(`Request failed: ${error.message}`);
+        .then(() => { testStats.successCount++; })
+        .catch(() => { testStats.errorCount++; })
+        .finally(() => {
+          testStats.requestsSent++;
+          requestsThisSecond++;
         });
     }
-    console.log(`Requests Sent: ${requestsSent}, Errors: ${errors}`);
   }, 1000);
 
-  res.status(200).json({ message: 'Load test started successfully.' });
+  const statsInterval = setInterval(() => {
+    if (!isTestRunning) {
+      clearInterval(statsInterval);
+      return;
+    }
+    testStats.requestsPerSecond = requestsThisSecond;
+    requestsThisSecond = 0;
+    const elapsedTime = ((Date.now() - testStats.startTime) / 1000).toFixed(0);
+    testStats.history.push({ time: elapsedTime, rps: testStats.requestsPerSecond });
+    if (testStats.history.length > 120) testStats.history.shift();
+  }, 1000);
+
+  testTimeout = setTimeout(() => {
+    stopTestLogic();
+  }, duration * 1000);
+
+  res.status(200).json({ message: 'Load test started.' });
 });
 
-// 3. Stop the Load Test
 app.post('/api/stop-test', (req, res) => {
-  if (!isTestRunning) {
-    return res.status(400).json({ message: 'No test is currently running.' });
-  }
+  if (!isTestRunning) return res.status(400).json({ message: 'No test is running.' });
+  stopTestLogic();
+  res.status(200).json({ message: 'Load test stopped manually.' });
+});
 
+app.get('/api/stats', (req, res) => {
+  const elapsedTime = isTestRunning ? (Date.now() - testStats.startTime) / 1000 : 0;
+  res.json({ isRunning: isTestRunning, stats: testStats, elapsedTime: elapsedTime.toFixed(1) });
+});
+
+// NEW: Endpoint to get the list of past reports
+app.get('/api/reports', (req, res) => {
+    res.json(reportHistory);
+});
+
+// NEW: Endpoint to analyze a report with Gemini AI
+app.post('/api/analyze-report', async (req, res) => {
+    const report = req.body.report;
+    if (!report) {
+        return res.status(400).send({ error: 'Report data is required.' });
+    }
+
+    const prompt = `Analyze the following load test report and provide a crisp, one-paragraph summary of the results. Mention the stability and performance based on the success/error rate and RPS.
+    - URL Tested: ${report.url}
+    - Concurrent Users: ${report.concurrency}
+    - Test Duration: ${report.duration} seconds
+    - Total Requests: ${report.requestsSent}
+    - Successful Requests: ${report.successCount}
+    - Failed Requests: ${report.errorCount}
+    - Average RPS: ${(report.requestsSent / report.duration).toFixed(2)}`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const text = response.text();
+        res.send({ analysis: text });
+    } catch (error) {
+        console.error("Error with Gemini API:", error);
+        res.status(500).send({ error: 'Failed to analyze report with AI.' });
+    }
+});
+
+
+const stopTestLogic = () => {
   isTestRunning = false;
   clearInterval(testInterval);
-  console.log('Test stopped.');
-  res.status(200).json({ message: 'Load test stopped successfully.' });
-});
+  clearTimeout(testTimeout);
+  testStats.endTime = Date.now();
 
+  // NEW: Save the completed report to history
+  if (testStats.requestsSent > 0) {
+    reportHistory.unshift(testStats); // Add to the beginning of the array
+    if (reportHistory.length > 3) {
+      reportHistory.pop(); // Keep only the last 3 reports
+    }
+  }
+  console.log('Test finished and report saved.');
+};
 
-// --- Start the Server ---
 app.listen(PORT, () => {
   console.log(`Backend server is running on http://localhost:${PORT}`);
 });
