@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import Chat from './components/Chat';
 import './App.css';
 
 const API_URL = 'https://atulrajput.site/api';
@@ -92,15 +93,16 @@ function App() {
     }
   };
 
-  const analyzeReport = async (reportToAnalyze) => {
-    setAnalysis({ content: null, loading: true, error: null });
+  const analyzeReport = async (message, reportToAnalyze = lastTestReport) => {
     try {
-      const response = await axios.post(`${API_URL}/api/analyze-report`, { report: reportToAnalyze.stats });
-      setAnalysis({ content: response.data.analysis, loading: false, error: null });
+      const response = await axios.post(`${API_URL}/api/analyze-report`, { 
+        message,
+        report: reportToAnalyze?.stats || null
+      });
+      return response.data;
     } catch (error) {
-      console.error(error);
-      const errorMessage = error.response?.data?.error || "Could not get AI analysis.";
-      setAnalysis({ content: null, loading: false, error: errorMessage });
+      console.error('Analysis error:', error);
+      throw new Error(error.response?.data?.error || "Could not get AI analysis.");
     }
   }
 
@@ -183,22 +185,11 @@ function App() {
             </div>
             {!isTesting && (
                 <div className="analysis-section">
-                  <button 
-                    onClick={() => analyzeReport(lastTestReport)} 
-                    disabled={analysis.loading}
-                  >
-                    {analysis.loading ? "Analyzing..." : "Analyze with AI ✨"}
-                  </button>
-                  {analysis.error && (
-                    <div className="ai-report error">
-                      <p>{analysis.error}</p>
-                    </div>
-                  )}
-                  {analysis.content && (
-                    <div className="ai-report">
-                      <p>{analysis.content}</p>
-                    </div>
-                  )}
+                  <h3>Test Results Analysis</h3>
+                  <Chat 
+                    testResults={lastTestReport.stats} 
+                    onSendMessage={analyzeReport}
+                  />
                 </div>
             )}
           </div>
