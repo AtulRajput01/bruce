@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-const Chat = ({ testResults, onSendMessage }) => {
+const Chat = ({ testResults, onSendMessage, lastTestReport }) => {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -31,12 +31,23 @@ const Chat = ({ testResults, onSendMessage }) => {
       // Show typing indicator
       setMessages(prev => [...prev, { role: 'assistant', content: '...', isLoading: true }]);
       
-      const response = await onSendMessage(input, testResults);
+      console.log('Sending message with testResults:', testResults);
+      
+      // Pass the full test results for better context
+      const response = await onSendMessage(input, { 
+        stats: testResults,
+        fullReport: lastTestReport
+      });
+      
+      console.log('Received response:', response);
       
       // Remove typing indicator and add assistant's response
       setMessages(prev => [
         ...prev.filter(msg => !msg.isLoading),
-        { role: 'assistant', content: response.analysis }
+        { 
+          role: 'assistant', 
+          content: response.analysis || response.message || 'I received your message but there was no analysis provided.'
+        }
       ]);
     } catch (error) {
       console.error('Error getting response:', error);
@@ -44,7 +55,7 @@ const Chat = ({ testResults, onSendMessage }) => {
         ...prev.filter(msg => !msg.isLoading),
         { 
           role: 'assistant', 
-          content: 'Sorry, I encountered an error. Please try again later.'
+          content: `Sorry, I encountered an error: ${error.message || 'Unknown error'}. Please try again later.`
         }
       ]);
     }

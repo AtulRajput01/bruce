@@ -163,50 +163,87 @@ app.get('/api/reports', (req, res) => {
 });
 
 // Chat-based analysis endpoint
-app.post('/api/analyze-report', async (req, res) => {
+app.post('/analyze-report', async (req, res) => {
     const { message, report } = req.body;
     
     if (!message) {
-        return res.status(400).send({ error: 'Message is required for analysis.' });
+        return res.status(400).json({ 
+            error: 'Message is required for analysis.',
+            status: 'error'
+        });
     }
 
     try {
-        let context = '';
+        console.log('Received analysis request with report:', report);
         
-        if (report) {
-            context = `Here are the test results you can analyze:
+        let context = 'You are a Load Testing Assistant. Your job is to help users understand and analyze their load test results.\n\n';
+        
+        if (report && (report.stats || report.fullReport)) {
+            const stats = report.stats || report.fullReport?.stats || {};
+            const config = report.fullReport?.config || {};
             
-            Test Duration: ${(report.endTime - report.startTime) / 1000} seconds
-            Total Requests: ${report.totalRequests}
-            Successful Requests: ${report.successfulRequests}
-            Failed Requests: ${report.failedRequests}
-            Success Rate: ${report.successRate}
-            Average RPS: ${report.averageRPS}
+            // Calculate metrics if not provided
+            const duration = stats.duration || 
+                (stats.endTime && stats.startTime ? (stats.endTime - stats.startTime) / 1000 : 0);
+                
+            const successRate = stats.successRate || 
+                (stats.totalRequests > 0 ? 
+                    ((stats.successfulRequests || 0) / stats.totalRequests * 100).toFixed(2) + '%' : 
+                    'N/A');
             
-            User's question: "${message}"
+            const avgRPS = stats.averageRPS || 
+                (stats.totalRequests > 0 && duration > 0 ? 
+                    (stats.totalRequests / duration).toFixed(2) : 
+                    'N/A');
             
-            Please provide a helpful response based on the test results above.`;
+            context += `Here are the test results you can analyze:
+
+Test Configuration:
+- URL: ${config.url || 'N/A'}
+- Method: ${config.method || 'GET'}
+- Duration: ${duration} seconds
+- Concurrent Users: ${config.concurrency || config.concurrentUsers || 'N/A'}
+
+Test Results:
+- Total Requests: ${stats.totalRequests || 0}
+- Successful Requests: ${stats.successfulRequests || 0}
+- Failed Requests: ${stats.failedRequests || 0}
+- Success Rate: ${successRate}
+- Average RPS: ${avgRPS}
+- Start Time: ${stats.startTime ? new Date(stats.startTime).toISOString() : 'N/A'}
+- End Time: ${stats.endTime ? new Date(stats.endTime).toISOString() : 'N/A'}
+
+User's question: "${message}"`;
         } else {
             context = `The user is asking about load testing in general. Here's their question: "${message}"`;
         }
         
         const prompt = `You are a Load Testing Assistant. Your job is to help users understand and analyze their load test results.
+
+${context}
+
+Please provide a clear, concise, and helpful response. 
+- If the user asks about specific metrics (like success rate, RPS, etc.), provide the exact numbers from the test results.
+- If the user asks for recommendations, suggest specific optimizations based on the test results.
+- If the test results show any issues (like high error rates or slow response times), point those out and suggest possible causes.`;
         
-        ${context}
-        
-        Provide a clear, concise, and helpful response. If the user asks for recommendations, suggest specific optimizations based on the test results.`;
+        console.log('Sending prompt to Gemini:', prompt);
         
         const result = await model.generateContent(prompt);
         const response = await result.response;
         const text = response.text();
         
-        res.send({ 
+        console.log('Received response from Gemini:', text);
+        
+        res.json({ 
+            status: 'success',
             analysis: text,
             timestamp: new Date().toISOString()
         });
     } catch (error) {
         console.error("Error with Gemini API:", error);
-        res.status(500).send({ 
+        res.status(500).json({ 
+            status: 'error',
             error: `AI analysis failed: ${error.message}`,
             details: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
