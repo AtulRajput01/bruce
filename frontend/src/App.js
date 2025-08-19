@@ -5,7 +5,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import Chat from './components/Chat';
 import './App.css';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = 'https://atulrajput.site/api';
 
 function App() {
   const [systemResources, setSystemResources] = useState(null);
